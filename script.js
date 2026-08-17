@@ -1,4 +1,4 @@
-```javascript
+
 const fetchButton = document.getElementById("fetchButton");
 
 const output = document.getElementById("output");
@@ -17,4 +17,4 @@ fetchButton.addEventListener("click", () => {
     timestampElement.textContent = new Date().toLocaleString("de-DE");
 
 });
-```
+
