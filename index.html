@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,37 +13,59 @@
 <body>
 
     <header class="header">
+
         <div>
             <h1>Arbitrage Dashboard</h1>
-            <p>Market Data &amp; Analysis</p>
+            <p>Yahoo Finance Market Data Test</p>
         </div>
 
         <div class="status">
-            <span class="status-dot"></span>
-            <span id="status">Online</span>
+            <span id="statusDot" class="status-dot"></span>
+            <span id="status">Bereit</span>
         </div>
+
     </header>
+
 
     <main>
 
+        <!-- FETCH TEST -->
+
         <section class="card">
-            <h2>Data Fetch Test</h2>
+
+            <h2>Yahoo Finance API Test</h2>
 
             <p>
-                Diese Seite ist aktuell mit GitHub Pages verbunden.
-                Als Nächstes testen wir hier das Abrufen externer Marktdaten.
+                Abruf von Marktdaten direkt aus dem Browser über
+                einen Yahoo-Finance-Chart-Endpunkt.
             </p>
 
-            <button id="fetchButton">
-                Daten abrufen
-            </button>
+            <div class="input-row">
+
+                <input
+                    id="symbolInput"
+                    type="text"
+                    value="AAPL"
+                    placeholder="Ticker, z.B. AAPL"
+                >
+
+                <button id="fetchButton">
+                    Daten abrufen
+                </button>
+
+            </div>
 
             <div id="output" class="output">
                 Noch keine Daten geladen.
             </div>
+
         </section>
 
+
+        <!-- MARKET DATA -->
+
         <section class="card">
+
             <h2>Market Data</h2>
 
             <div class="data-grid">
@@ -58,21 +81,50 @@
                 </div>
 
                 <div class="data-item">
-                    <span class="label">Timestamp</span>
+                    <span class="label">Currency</span>
+                    <span id="currency" class="value">---</span>
+                </div>
+
+                <div class="data-item">
+                    <span class="label">Previous Close</span>
+                    <span id="previousClose" class="value">---</span>
+                </div>
+
+                <div class="data-item">
+                    <span class="label">Market Time</span>
                     <span id="timestamp" class="value">---</span>
                 </div>
 
+                <div class="data-item">
+                    <span class="label">Data Source</span>
+                    <span id="source" class="value">---</span>
+                </div>
+
             </div>
+
+        </section>
+
+
+        <!-- RAW JSON -->
+
+        <section class="card">
+
+            <h2>Raw Response</h2>
+
+            <pre id="rawData" class="raw-data">---</pre>
+
         </section>
 
     </main>
+
 
     <footer>
         <p>Arbitrage Analysis Project</p>
     </footer>
 
+
     <script src="script.js"></script>
 
 </body>
-</html>
 
+</html>
