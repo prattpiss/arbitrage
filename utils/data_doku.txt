@@ -1,0 +1,1321 @@
+"""
+======================================================================
+YAHOO FINANCE UNIVERSAL CLIENT
+======================================================================
+
+ZWECK
+-----
+Diese Klasse stellt eine einheitliche Python-Schnittstelle zu
+verschiedenen Yahoo-Finance-Web-Endpunkten bereit.
+
+Die Klasse ist bewusst nicht auf eine einzelne Datenart beschränkt.
+Sie kann unter anderem:
+
+    - historische Preisreihen
+    - OHLCV-Daten
+    - Adjusted Close
+    - aktuelle Quotes
+    - Unternehmensinformationen
+    - Fundamentaldaten
+    - Bilanzdaten
+    - Gewinn- und Verlustrechnung
+    - Cashflows
+    - Earnings
+    - Analysteninformationen
+    - Insidertransaktionen
+    - institutionelle Eigentümer
+    - Fondsbesitz
+    - Optionsketten
+    - Unternehmenssuche
+
+abrufen.
+
+Die Klasse arbeitet direkt mit HTTP-Requests gegen Yahoo-Finance-
+Endpunkte und benötigt deshalb nicht die Bibliothek "yfinance".
+
+
+======================================================================
+GRUNDARCHITEKTUR
+======================================================================
+
+Die Klasse besitzt mehrere unterschiedliche Datenwege:
+
+                         Yahoo Finance
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+             ▼                ▼                ▼
+          CHART          QUOTE SUMMARY       QUOTE
+             │                │                │
+             ▼                ▼                ▼
+        Preisreihen       Fundamentaldaten   aktuelle Kurse
+             │                │
+             │                ├── Bilanz
+             │                ├── Income
+             │                ├── Cashflow
+             │                ├── Insider
+             │                ├── Eigentümer
+             │                └── usw.
+             │
+             ▼
+        pandas DataFrame
+
+
+Zusätzlich:
+
+    SEARCH
+        └── Unternehmenssuche
+
+    OPTIONS
+        └── Optionsketten
+
+
+======================================================================
+AUTHENTICATION
+======================================================================
+
+Einige Yahoo-Endpunkte akzeptieren einfache Requests nicht mehr.
+
+Insbesondere können folgende Endpunkte eine Yahoo-Session benötigen:
+
+    - quote
+    - quoteSummary
+    - options
+
+Dafür verwendet die Klasse:
+
+    1. Yahoo-Cookie
+    2. Yahoo-Crumb
+
+Der Ablauf ist:
+
+    Yahoo Cookie
+        ↓
+    Session Cookie
+        ↓
+    Crumb
+        ↓
+    authentifizierter Request
+        ↓
+    JSON-Antwort
+
+
+Die historische CHART-API benötigt diesen Mechanismus normalerweise
+nicht.
+
+
+======================================================================
+WICHTIGER HINWEIS
+======================================================================
+
+Yahoo Finance stellt diese Endpunkte nicht als stabile, offiziell
+dokumentierte öffentliche API für beliebige externe Programme bereit.
+
+Daher können:
+
+    - URLs
+    - Module
+    - Parameter
+    - Authentifizierung
+    - Rate Limits
+    - Antwortstrukturen
+
+zukünftig geändert werden.
+
+Die Klasse ist deshalb als flexibler Forschungs-/Analyse-Client
+gedacht und nicht als garantiert dauerhaft stabile Produktions-API.
+
+
+======================================================================
+1. __init__()
+======================================================================
+
+SIGNATUR:
+
+    YahooFinance(
+        timeout=20,
+        retries=3,
+        pause=0.5,
+        auto_auth=True
+    )
+
+
+AUFGABE
+-------
+Erstellt eine Yahoo-Finance-Session.
+
+Dabei werden:
+
+    - requests.Session()
+    - HTTP-Header
+    - Timeout
+    - Retry-Anzahl
+    - Wartezeit
+    - Crumb
+
+initialisiert.
+
+
+PARAMETER
+---------
+
+timeout : int
+    Maximale Wartezeit eines HTTP-Requests in Sekunden.
+
+retries : int
+    Anzahl der erneuten Versuche bei einem Fehler.
+
+pause : float
+    Grundwartezeit zwischen Requests bzw. Retries.
+
+auto_auth : bool
+    Wenn True, wird beim Erstellen des Objekts automatisch
+    Cookie + Crumb geladen.
+
+
+BEISPIEL:
+
+    yf = YahooFinance(
+        timeout=20,
+        retries=3,
+        pause=1,
+        auto_auth=True
+    )
+
+
+======================================================================
+2. authenticate()
+======================================================================
+
+SIGNATUR:
+
+    yf.authenticate()
+
+
+AUFGABE
+-------
+Initialisiert bzw. erneuert die Yahoo-Authentifizierung.
+
+Dabei werden:
+
+    1. Cookie von Yahoo angefordert
+    2. Cookie in der Session gespeichert
+    3. Crumb angefordert
+    4. Crumb in self.crumb gespeichert
+
+
+ERGEBNIS:
+
+    self.crumb
+
+enthält anschließend den aktuell verwendeten Yahoo-Crumb.
+
+
+WIRD VERWENDET FÜR:
+
+    - quote()
+    - get()
+    - options()
+
+
+BEISPIEL:
+
+    yf.authenticate()
+
+
+======================================================================
+3. _ensure_auth()
+======================================================================
+
+INTERNE FUNKTION
+
+
+AUFGABE
+-------
+Prüft, ob bereits ein Crumb vorhanden ist.
+
+Wenn kein Crumb vorhanden ist:
+
+    authenticate()
+
+wird automatisch aufgerufen.
+
+
+WARUM?
+------
+Damit muss der Benutzer die Authentifizierung nicht bei jedem
+Request manuell durchführen.
+
+
+======================================================================
+4. _request()
+======================================================================
+
+INTERNE KERNFUNKTION
+
+
+SIGNATUR:
+
+    _request(
+        url,
+        params=None,
+        authenticated=False
+    )
+
+
+AUFGABE
+-------
+Führt tatsächlich den HTTP-Request aus.
+
+Fast alle anderen Funktionen verwenden diese Funktion.
+
+
+ABLAUF:
+
+    URL + Parameter
+          ↓
+    Session verwenden
+          ↓
+    ggf. Crumb hinzufügen
+          ↓
+    HTTP GET
+          ↓
+    Statuscode prüfen
+          ↓
+    JSON zurückgeben
+
+
+BEHANDELT:
+
+    normale Antworten
+    HTTP-Fehler
+    401 Unauthorized
+    403 Forbidden
+    429 Too Many Requests
+    Retry
+    erneute Authentifizierung
+
+
+BEI 401/403:
+
+    Cookie + Crumb werden erneuert.
+
+
+BEI 429:
+
+    Die Funktion wartet und versucht es erneut.
+
+
+RÜCKGABE:
+
+    Python-Dictionary / JSON-Daten
+
+
+======================================================================
+5. available_modules()
+======================================================================
+
+SIGNATUR:
+
+    yf.available_modules()
+
+
+AUFGABE
+-------
+Gibt alle bekannten Aliasnamen der Quote-Summary-Module zurück.
+
+
+BEISPIEL:
+
+    yf.available_modules()
+
+
+ERGEBNIS z.B.:
+
+    [
+        "balance",
+        "cashflow",
+        "financial",
+        "income",
+        "insiders",
+        "statistics",
+        ...
+    ]
+
+
+NÜTZLICH FÜR:
+
+    - Übersicht
+    - Jupyter
+    - Exploration
+    - Debugging
+
+
+======================================================================
+6. _resolve_modules()
+======================================================================
+
+INTERNE FUNKTION
+
+
+AUFGABE
+-------
+Übersetzt benutzerfreundliche Aliasnamen in die tatsächlichen
+Yahoo-Modulnamen.
+
+
+BEISPIEL:
+
+    "financial"
+
+wird zu:
+
+    "financialData"
+
+
+oder:
+
+    "cashflow"
+
+wird zu:
+
+    "cashflowStatementHistory"
+
+
+Dadurch muss der Benutzer die technischen Yahoo-Namen nicht kennen.
+
+
+SONDERFALL:
+
+    "all"
+
+
+führt dazu, dass alle bekannten Module angefordert werden.
+
+
+======================================================================
+7. get()
+======================================================================
+
+SIGNATUR:
+
+    yf.get(
+        symbol,
+        modules
+    )
+
+
+AUFGABE
+-------
+Universeller Zugriff auf Quote-Summary-Daten.
+
+
+BEISPIEL:
+
+    yf.get(
+        "AAPL",
+        "financial"
+    )
+
+
+oder:
+
+    yf.get(
+        "AAPL",
+        [
+            "financial",
+            "balance",
+            "cashflow",
+            "insiders"
+        ]
+    )
+
+
+oder:
+
+    yf.get(
+        "AAPL",
+        "all"
+    )
+
+
+DATENFLUSS:
+
+    Symbol
+      ↓
+    Modulname
+      ↓
+    _resolve_modules()
+      ↓
+    Yahoo quoteSummary
+      ↓
+    _request()
+      ↓
+    JSON
+
+
+RÜCKGABE:
+
+    Rohes JSON / Python-Dictionary
+
+
+WICHTIG:
+--------
+Diese Funktion gibt bewusst die Rohdaten zurück.
+
+Damit gehen keine Informationen verloren.
+
+
+======================================================================
+8. df()
+======================================================================
+
+SIGNATUR:
+
+    yf.df(
+        symbol,
+        module
+    )
+
+
+AUFGABE
+-------
+Wie get(), aber die Antwort wird direkt in einen
+pandas.DataFrame umgewandelt.
+
+
+BEISPIEL:
+
+    df = yf.df(
+        "AAPL",
+        "financial"
+    )
+
+
+NÜTZLICH FÜR:
+
+    - pandas
+    - Statistik
+    - Visualisierung
+    - Jupyter
+    - Datenanalyse
+
+
+INTERN:
+
+    get()
+        ↓
+    quoteSummary
+        ↓
+    JSON
+        ↓
+    pandas.json_normalize()
+        ↓
+    DataFrame
+
+
+======================================================================
+9. history()
+======================================================================
+
+SIGNATUR:
+
+    yf.history(
+        symbol,
+        interval="1d",
+        range="1y",
+        start=None,
+        end=None,
+        events="div,splits",
+        prepost=False
+    )
+
+
+AUFGABE
+-------
+Lädt historische Marktdaten.
+
+
+GELIEFERTE DATEN:
+
+    timestamp
+    open
+    high
+    low
+    close
+    volume
+    adj_close
+
+
+OHLCV:
+
+    O = Open
+    H = High
+    L = Low
+    C = Close
+    V = Volume
+
+
+BEISPIEL:
+
+    prices = yf.history(
+        "AAPL",
+        interval="1d",
+        range="10y"
+    )
+
+
+MÖGLICHE INTERVALLE:
+
+    1m
+    2m
+    5m
+    15m
+    30m
+    60m
+    90m
+    1h
+    1d
+    5d
+    1wk
+    1mo
+    3mo
+
+
+BEISPIEL MIT DATUM:
+
+    yf.history(
+        "AAPL",
+        start="2015-01-01",
+        end="2025-01-01",
+        interval="1d"
+    )
+
+
+RÜCKGABE:
+
+    pandas.DataFrame
+
+
+INDEX:
+
+    timestamp
+
+
+======================================================================
+10. quote()
+======================================================================
+
+SIGNATUR:
+
+    yf.quote(
+        symbols
+    )
+
+
+AUFGABE
+-------
+Lädt aktuelle Marktdaten für einen oder mehrere Ticker.
+
+
+BEISPIEL:
+
+    yf.quote("AAPL")
+
+
+oder:
+
+    yf.quote(
+        [
+            "AAPL",
+            "MSFT",
+            "NVDA"
+        ]
+    )
+
+
+RÜCKGABE:
+
+    pandas.DataFrame
+
+
+NÜTZLICH FÜR:
+
+    - aktueller Preis
+    - Marktkapitalisierung
+    - Bid/Ask
+    - Volumen
+    - Börseninformationen
+    - aktuelle Kennzahlen
+
+
+======================================================================
+11. search()
+======================================================================
+
+SIGNATUR:
+
+    yf.search(
+        query
+    )
+
+
+AUFGABE
+-------
+Sucht nach Unternehmen, Aktien und anderen Yahoo-Finance-Symbolen.
+
+
+BEISPIEL:
+
+    yf.search(
+        "Nvidia"
+    )
+
+
+NÜTZLICH FÜR:
+
+    - Ticker finden
+    - Unternehmen suchen
+    - Symbolauflösung
+
+
+RÜCKGABE:
+
+    Rohes JSON
+
+
+======================================================================
+12. options()
+======================================================================
+
+SIGNATUR:
+
+    yf.options(
+        symbol,
+        expiration=None
+    )
+
+
+AUFGABE
+-------
+Lädt die Optionskette eines Unternehmens.
+
+
+BEISPIEL:
+
+    yf.options(
+        "AAPL"
+    )
+
+
+MIT BESTIMMTEM VERFALLSDATUM:
+
+    yf.options(
+        "AAPL",
+        expiration=UNIX_TIMESTAMP
+    )
+
+
+RÜCKGABE:
+
+    Rohes JSON
+
+
+ENTHÄLT TYPISCHERWEISE:
+
+    Calls
+    Puts
+    Strike
+    Bid
+    Ask
+    Last Price
+    Volume
+    Open Interest
+    Implied Volatility
+    Expiration
+
+
+======================================================================
+13. options_df()
+======================================================================
+
+SIGNATUR:
+
+    yf.options_df(
+        symbol,
+        expiration=None
+    )
+
+
+AUFGABE
+-------
+Wie options(), aber die Optionsdaten werden direkt in DataFrames
+umgewandelt.
+
+
+RÜCKGABE:
+
+    {
+        "calls": DataFrame,
+        "puts": DataFrame,
+        "expiration_dates": [...]
+    }
+
+
+BEISPIEL:
+
+    options = yf.options_df(
+        "AAPL"
+    )
+
+    calls = options["calls"]
+
+    puts = options["puts"]
+
+
+NÜTZLICH FÜR:
+
+    - Optionsanalyse
+    - Volatilitätsanalyse
+    - Put/Call-Vergleiche
+    - Implied Volatility
+    - Open Interest
+    - Optionsarbitrage
+
+
+======================================================================
+14. many()
+======================================================================
+
+SIGNATUR:
+
+    yf.many(
+        symbols,
+        module,
+        as_dataframe=False
+    )
+
+
+AUFGABE
+-------
+Führt dieselbe Datenabfrage für viele Unternehmen aus.
+
+
+BEISPIEL:
+
+    data = yf.many(
+        [
+            "AAPL",
+            "MSFT",
+            "NVDA",
+            "GOOG"
+        ],
+        "financial"
+    )
+
+
+MIT DATAFRAMES:
+
+    data = yf.many(
+        [
+            "AAPL",
+            "MSFT",
+            "NVDA"
+        ],
+        "financial",
+        as_dataframe=True
+    )
+
+
+RÜCKGABE:
+
+    Dictionary
+
+    {
+        "AAPL": DataFrame,
+        "MSFT": DataFrame,
+        "NVDA": DataFrame
+    }
+
+
+WICHTIG:
+--------
+Ein Fehler bei einem einzelnen Unternehmen stoppt nicht automatisch
+den gesamten Batch.
+
+
+======================================================================
+15. history_many()
+======================================================================
+
+SIGNATUR:
+
+    yf.history_many(
+        symbols,
+        interval="1d",
+        range="1y"
+    )
+
+
+AUFGABE
+-------
+Lädt historische Preisreihen für mehrere Unternehmen.
+
+
+BEISPIEL:
+
+    prices = yf.history_many(
+        [
+            "AAPL",
+            "MSFT",
+            "NVDA",
+            "GOOG"
+        ],
+        interval="1d",
+        range="10y"
+    )
+
+
+RÜCKGABE:
+
+    {
+        "AAPL": DataFrame,
+        "MSFT": DataFrame,
+        "NVDA": DataFrame,
+        "GOOG": DataFrame
+    }
+
+
+BESONDERS NÜTZLICH FÜR:
+
+    - Korrelation
+    - Cointegration
+    - Pairs Trading
+    - Statistical Arbitrage
+    - Faktoranalysen
+    - Portfolioanalyse
+
+
+======================================================================
+16. save_csv()
+======================================================================
+
+SIGNATUR:
+
+    yf.save_csv(
+        df,
+        filename
+    )
+
+
+AUFGABE
+-------
+Speichert einen DataFrame als CSV.
+
+
+BEISPIEL:
+
+    yf.save_csv(
+        prices,
+        "AAPL_prices.csv"
+    )
+
+
+======================================================================
+17. save_parquet()
+======================================================================
+
+SIGNATUR:
+
+    yf.save_parquet(
+        df,
+        filename
+    )
+
+
+AUFGABE
+-------
+Speichert einen DataFrame im Parquet-Format.
+
+
+BEISPIEL:
+
+    yf.save_parquet(
+        prices,
+        "AAPL_prices.parquet"
+    )
+
+
+WARUM PARQUET?
+--------------
+Parquet ist für große quantitative Datenmengen meist deutlich
+geeigneter als CSV.
+
+Vorteile:
+
+    - kompakter
+    - schneller
+    - Datentypen bleiben erhalten
+    - geeignet für große Zeitreihen
+
+
+======================================================================
+18. info()
+======================================================================
+
+SIGNATUR:
+
+    yf.info()
+
+
+AUFGABE
+-------
+Zeigt Informationen über den aktuellen Client.
+
+
+AUSGABE:
+
+    - Timeout
+    - Retries
+    - Authentication Status
+    - verfügbare Module
+
+
+======================================================================
+DATENMODULE
+======================================================================
+
+Die Aliasnamen der Klasse entsprechen folgenden Yahoo-Daten:
+
+
+PREIS
+-----
+
+    price
+        Preisübersicht
+
+
+UNTERNEHMEN
+-----------
+
+    profile
+        Unternehmensprofil
+
+
+FUNDAMENTALS
+------------
+
+    financial
+        Finanzkennzahlen
+
+    statistics
+        statistische Kennzahlen
+
+
+BILANZ
+------
+
+    balance
+        historische Bilanz
+
+    balance_q
+        quartalsweise Bilanz
+
+
+INCOME STATEMENT
+----------------
+
+    income
+        historische Gewinn-/Verlustrechnung
+
+    income_q
+        quartalsweise Gewinn-/Verlustrechnung
+
+
+CASHFLOW
+--------
+
+    cashflow
+        historische Cashflows
+
+    cashflow_q
+        quartalsweise Cashflows
+
+
+EARNINGS
+--------
+
+    earnings
+        Earnings
+
+    earnings_history
+        historische Earnings
+
+    earnings_trend
+        Earnings-Trends
+
+
+INSIDER
+-------
+
+    insiders
+        Insidertransaktionen
+
+    insider_holders
+        Insider-Beteiligungen
+
+
+EIGENTÜMER
+----------
+
+    institutional
+        institutionelle Eigentümer
+
+    funds
+        Fondsbesitz
+
+    holders
+        größere Eigentümer
+
+
+ANALYSTEN
+---------
+
+    recommendations
+        Analystenempfehlungen
+
+    upgrades
+        Upgrades / Downgrades
+
+
+OPTIONEN
+--------
+
+    options()
+    options_df()
+
+
+KALENDER
+--------
+
+    calendar
+        Unternehmensereignisse
+
+
+ESG
+---
+
+    esg
+
+
+SEC
+---
+
+    sec
+
+
+======================================================================
+TYPISCHER WORKFLOW
+======================================================================
+
+Ein einfacher Research-Workflow sieht beispielsweise so aus:
+
+
+    yf = YahooFinance()
+
+
+    # 1. Preisreihe
+
+    prices = yf.history(
+        "AAPL",
+        range="10y"
+    )
+
+
+    # 2. Fundamentaldaten
+
+    fundamentals = yf.df(
+        "AAPL",
+        "financial"
+    )
+
+
+    # 3. Bilanz
+
+    balance = yf.df(
+        "AAPL",
+        "balance"
+    )
+
+
+    # 4. Cashflow
+
+    cashflow = yf.df(
+        "AAPL",
+        "cashflow"
+    )
+
+
+    # 5. Insider
+
+    insiders = yf.df(
+        "AAPL",
+        "insiders"
+    )
+
+
+    # 6. Optionen
+
+    options = yf.options_df(
+        "AAPL"
+    )
+
+
+======================================================================
+FÜR ARBITRAGE-ANALYSEN
+======================================================================
+
+Der Client kann anschließend als Datenquelle für quantitative
+Analysen verwendet werden.
+
+
+BEISPIEL:
+
+    symbols = [
+        "AAPL",
+        "MSFT",
+        "GOOG",
+        "AMZN",
+        "META",
+        "NVDA"
+    ]
+
+
+    prices = yf.history_many(
+        symbols,
+        interval="1d",
+        range="10y"
+    )
+
+
+Darauf können anschließend beispielsweise angewendet werden:
+
+
+    Renditen
+        ↓
+    Volatilität
+        ↓
+    Korrelation
+        ↓
+    Rolling Correlation
+        ↓
+    Regression
+        ↓
+    Hedge Ratio
+        ↓
+    Spread
+        ↓
+    Stationarität
+        ↓
+    ADF / KPSS
+        ↓
+    Cointegration
+        ↓
+    Half-Life
+        ↓
+    Hurst Exponent
+        ↓
+    Z-Score
+        ↓
+    Entry / Exit
+        ↓
+    Backtest
+        ↓
+    Out-of-Sample-Test
+
+
+======================================================================
+WICHTIGE UNTERSCHEIDUNG
+======================================================================
+
+Es gibt drei Ebenen der Datenverarbeitung:
+
+
+1. RAW
+-------
+
+    yf.get(...)
+
+liefert möglichst unveränderte Yahoo-Daten.
+
+
+2. DATAFRAME
+------------
+
+    yf.df(...)
+
+wandelt die Daten in pandas DataFrames um.
+
+
+3. ANALYSE
+----------
+
+Die eigentliche quantitative Analyse sollte anschließend getrennt
+vom Yahoo-Client stattfinden.
+
+Beispielsweise:
+
+
+    YahooFinance
+          ↓
+    Data Acquisition
+          ↓
+    Data Cleaning
+          ↓
+    Feature Engineering
+          ↓
+    Statistical Tests
+          ↓
+    Model
+          ↓
+    Backtest
+          ↓
+    Risk Analysis
+
+
+Dadurch bleibt der Datenzugriff unabhängig von der späteren
+Handelsstrategie.
+
+
+======================================================================
+GRUNDIDEE DER KLASSE
+======================================================================
+
+Die Klasse ist bewusst als DATA-ACCESS-LAYER konzipiert.
+
+Sie soll nicht selbst entscheiden:
+
+    "Welche Aktie soll ich kaufen?"
+
+sondern nur zuverlässig Daten bereitstellen.
+
+Damit kann dieselbe Datenbasis später für verschiedene Modelle
+verwendet werden:
+
+    - Arbitrage
+    - Statistical Arbitrage
+    - Pairs Trading
+    - Momentum
+    - Mean Reversion
+    - Faktorstrategien
+    - Event Studies
+    - Fundamentalanalyse
+    - Optionsanalyse
+    - Portfoliooptimierung
+    - Machine Learning
+
+
+======================================================================
+END
+======================================================================
+"""
