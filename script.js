@@ -1,6 +1,4 @@
-
 const fetchButton = document.getElementById("fetchButton");
-
 const output = document.getElementById("output");
 
 const assetElement = document.getElementById("asset");
@@ -17,4 +15,3 @@ fetchButton.addEventListener("click", () => {
     timestampElement.textContent = new Date().toLocaleString("de-DE");
 
 });
-
