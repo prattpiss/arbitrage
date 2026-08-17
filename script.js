@@ -30,6 +30,9 @@ const symbolInput = document.getElementById("symbolInput");
  * range=1d
  *
  * 
+ * 
+ *
+ * 
  */
 
 async function fetchYahooData(symbol) {
